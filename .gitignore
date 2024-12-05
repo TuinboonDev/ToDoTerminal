@@ -1,0 +1,12 @@
+# Ignore Rust compilation artifacts
+/target/
+**/target/
+
+# Ignore build scripts output
+/build/
+**/build/
+
+# Ignore Cargo.lock (if you're using a library)
+**/Cargo.lock
+
+**/target/**
