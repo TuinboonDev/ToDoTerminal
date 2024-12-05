@@ -4,7 +4,7 @@ const HOST: &str = "http://localhost:5000";
 const ENDPOINT: &str = "/api/new";
 
 fn make_request(host: &str) {
-
+    //Yes test
 }
 
 #[tokio::main]
