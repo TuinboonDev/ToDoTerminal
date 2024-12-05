@@ -10,3 +10,7 @@
 **/Cargo.lock
 
 **/target/**
+
+**/.vscode/**
+**/.env
+**/database.json
