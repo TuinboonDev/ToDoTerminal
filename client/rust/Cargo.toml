@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 qr2term = "0.3.3"
 reqwest = { version = "0.12.9", features = ["json"] }
+serde_json = "1.0.133"
 tokio = { version = "1.41.1", features = ["full"] }

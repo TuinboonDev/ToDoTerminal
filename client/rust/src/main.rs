@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::io;
 
 const HOST: &str = "http://localhost:5000";
 const ENDPOINT: &str = "/api/new";
@@ -31,16 +32,62 @@ async fn main() {
 
             }
             if args[2] == "create" {
-                let mut line = String::new();
-                println!("Enter your name :");
-                let b1 = std::io::stdin().read_line(&mut line).unwrap();
-                // let what = client.post(HOST.to_owned() +  ENDPOINT)
-                //     .body("{\"what\": \"crazy\"}")
-                //     .send()
-                //     .await.unwrap();
-                // if what.status() != 201 {
-                //     println!("You bum!")
-                // }
+                let mut input = String::new();
+                println!("Please enter your desired username:");
+                io::stdin().read_line(&mut input).expect("Failed to read line");
+                let username = input.trim().to_string(); 
+                input.clear();
+                println!("Your desired username is: {}", username);
+                println!("Please enter your email address:");
+                io::stdin().read_line(&mut input).expect("Failed to read line");
+                let email = input.trim().to_string();
+                input.clear();
+                println!("Your email address is: {}", email);
+                println!("Please enter your password:");
+                io::stdin().read_line(&mut input).expect("Failed to read line");
+                let password = input.trim().to_string();
+                println!("Your password is: {}", password);
+                input.clear();
+
+                let mut data = HashMap::new();
+                data.insert("username", username);
+                data.insert("password", password);
+                data.insert("email", email);
+                let create_account = client.post(HOST.to_owned() +  "/api/users/new")
+                    .json(&data)
+                    .send()
+                    .await.unwrap();
+
+                if create_account.status() == 201 {
+                    let json_response = &create_account.json::<serde_json::Value>().await.unwrap();
+
+                    qr2term::print_qr(json_response["url"].as_str().unwrap());
+                    println!("{}", json_response["url"].as_str().unwrap());
+
+                    println!("Please scan the QR code with a 2FA app of your choice and write the code below:");
+                    io::stdin().read_line(&mut input).expect("Failed to read line");
+                    let otp_code = input.trim().to_string();
+                    input.clear();
+
+                    let id = json_response["id"].as_str().unwrap().to_string();
+                    data.clear();
+                    data.insert("id", id);
+                    data.insert("otp_code", otp_code);
+
+                    let verify_account = client.post(HOST.to_owned() +  "/api/users/verify")
+                        .json(&data)
+                        .send()
+                        .await.unwrap();
+
+
+                    if verify_account.status() == 201 {
+                        let json_response = &verify_account.json::<serde_json::Value>().await.unwrap();
+
+                        println!("good")
+                    }
+                } else {
+                    eprintln!("Account was not created")
+                }
             }
         }
         _ => {
