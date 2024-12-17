@@ -53,7 +53,7 @@ async fn main() {
                 data.insert("username", username);
                 data.insert("password", password);
                 data.insert("email", email);
-                let create_account = client.post(HOST.to_owned() +  "/api/users/new")
+                let create_account = client.post(HOST.to_owned() +  "/api/auth/new")
                     .json(&data)
                     .send()
                     .await.unwrap();
@@ -74,7 +74,7 @@ async fn main() {
                     data.insert("id", id);
                     data.insert("otp_code", otp_code);
 
-                    let verify_account = client.post(HOST.to_owned() +  "/api/users/verify")
+                    let verify_account = client.post(HOST.to_owned() +  "/api/auth/verify")
                         .json(&data)
                         .send()
                         .await.unwrap();
@@ -89,6 +89,27 @@ async fn main() {
                     eprintln!("Account was not created")
                 }
             }
+        }
+        "2fa" => {
+            let mut input = String::new();
+
+            io::stdin().read_line(&mut input).expect("Failed to read line");
+            let otp_code = input.trim().to_string();
+            input.clear();
+
+            let mut data = HashMap::new();
+            data.insert("otp_code", otp_code);
+            data.insert("id", "0923681112".to_string());
+            data.insert("otp_key", "L5C5ULZM2FMYEI5V6ZJ6FFPPVQPFY427".to_string());
+            let response = client.post(HOST.to_owned() +  "/api/auth/verify")
+                .json(&data)
+                .send()
+                .await.unwrap();
+
+            let json_response = &response.json::<serde_json::Value>().await.unwrap();
+
+
+            println!("{}", json_response)
         }
         _ => {
 
