@@ -213,13 +213,17 @@ def hello_world():
     
 @app.route("/api/notes/get", methods=["GET"])
 def get_note():
-    access_token = request.json["access_token"]
+    access_token = request.headers.get("Authorization").split(" ")[1]
     decoded = verify_token(access_token, SECRET_KEY)
-    
-    user_id = decoded["user_id"]
-    
-    with open("notes.json", "r") as f:
-        return json.loads(f.read())[user_id]["notes"]
+    if decoded == "expired":
+        return jsonify({"message": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"message": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        
+        with open("notes.json", "r") as f:
+            return json.loads(f.read())[user_id]["notes"]
 
 if __name__ == "__main__":
     app.run(debug=True)
