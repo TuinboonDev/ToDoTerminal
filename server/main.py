@@ -53,145 +53,139 @@ def verify_token(token, secret):
 def create_user():
     user_data = request.json
     
-    with open("database.json", "r") as f:
-        data = json.load(f)
-        
-        for user in data["users"]:
-            if user["email"] == user_data["email"]:
-                return json.dumps({"message": "An account with this email already exists."}), 409
-            if user["username"] == user_data["username"]:
-                return json.dumps({"message": "This username is already taken."}), 409
+    database_file = open("database.json", "r")
+    cache_file = open("cache.json", "r+")
     
-    with open("cache.json", "r+") as f:
-        cache_data = json.load(f)
+    database = json.load(database_file)
+    cache = json.load(cache_file)
         
-        x = datetime.now()            
+    for user in database["users"]:
+        if user["email"] == user_data["email"]:
+            return json.dumps({"message": "An account with this email already exists."}), 409
+        if user["username"] == user_data["username"]:
+            return json.dumps({"message": "This username is already taken."}), 409
+    
+    x = datetime.now()            
+    
+    # TODO: ig there could be duplicate IDs
+    
+    id = str(x.strftime("%f%H%M"))
+    
+    # TODO: Fix the user ID fields, they are kinda confusing here
+    
+    otp_key = pyotp.random_base32()
+    
+    if not id in database:
+        for user in cache:
+            if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
+                cache.remove(user)
+                
+        user_data["expiry"] = x + timedelta(minutes=30)
+        user_data["id"] = str(id)
+        user_data["otp_key"] = otp_key
+        user_data["purpose"] = "new_account"
+        cache.append(user_data)
         
-        # TODO: ig there could be duplicate IDs
+        cache_file.seek(0)
+        json.dump(cache, cache_file)
+        cache_file.truncate()
         
-        id = str(x.strftime("%f%H%M"))
+        totp = pyotp.TOTP(otp_key)
+        uri = totp.provisioning_uri(name="ToDoTerminal", issuer_name="2FA")
         
-        # TODO: Fix the user ID fields, they are kinda confusing here
-        
-        otp_key = pyotp.random_base32()
-        
-        if not id in data:
-            for user in cache_data:
-                if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
-                    cache_data.remove(user)
-                    
-            user_data["expiry"] = x + timedelta(minutes=30)
-            user_data["id"] = str(id)
-            user_data["otp_key"] = otp_key
-            user_data["purpose"] = "new_account"
-            cache_data.append(user_data)
-            
-            f.seek(0)
-            json.dump(cache_data, f)
-            f.truncate()
-            
-            totp = pyotp.TOTP(otp_key)
-            uri = totp.provisioning_uri(name="ToDoTerminal", issuer_name="2FA")
-            
-            return json.dumps({"url": uri, "id": user_data["id"]}), 201
-        else:
-            return json.dumps({"message": "Account was deleted from cache after 30 minutes of inactivity, please create a new account."}), 410
+        return json.dumps({"url": uri, "id": str(id)}), 201
+    else:
+        return json.dumps({"message": "Account was deleted from cache after 30 minutes of inactivity, please create a new account."}), 410
         
 @app.route("/api/auth/verify", methods=["POST"])
 def verify_account():
     user_data = request.json
-    with open("cache.json", "r+") as f:
-        cache = json.load(f)
-        
-        for user in cache:
-            print(type(user["id"]), type(user_data["id"]))
+    cache_file = open("cache.json", "r+")
+    database_file = open("database.json", "r+")
 
-            print(user["id"], user_data["id"])
-            if user["id"] == user_data["id"]:
-                totp = pyotp.TOTP(user["otp_key"])
-                if totp.verify(user_data["otp_code"]):
-                    cache.remove(user)
+    cache = json.load(cache_file)
+    database = json.load(database_file)
+        
+    for cache_user in cache:
+        if cache_user["id"] == user_data["id"]:
+            totp = pyotp.TOTP(cache_user["otp_key"])
+            if totp.verify(user_data["otp_code"]):
+                cache.remove(cache_user)
                     
-                    f.seek(0)
-                    json.dump(cache, f)
-                    f.truncate()
+                cache_file.seek(0)
+                json.dump(cache, cache_file)
+                cache_file.truncate()
                                         
-                    id = user["id"]
-                    
-                    with open("database.json", "r+") as h:
-                        data = json.load(h)
+                id = cache_user["id"]
                         
-                        for userb in data["users"]:
-                            print(userb["id"], user_data["id"])
-                            if userb["id"] == user_data["id"]:
-                                userb["token_version"] += 1
+                match cache_user["purpose"]:
+                    case "new_account":   
+                        database["users"].append({
+                            "username": cache_user["username"],
+                            "password": cache_user["password"],
+                            "email": cache_user["email"],
+                            "otp_key": cache_user["otp_key"],
+                            "id": id,
+                            "token_version": 0
+                        })
                                 
-                                h.seek(0)
-                                json.dump(data, h)
-                                h.truncate()
+                        database_file.seek(0)
+                        json.dump(database, database_file)
+                        database_file.truncate()
                         
-                    match user["purpose"]:
-                        case "new_account":   
-                            with open("database.json", "r+") as g:
-                                data = json.load(g)        
-                           
-                                data["users"].append({
-                                    "username": user["username"],
-                                    "password": user["password"],
-                                    "email": user["email"],
-                                    "otp_key": user["otp_key"],
-                                    "id": id,
-                                    "token_version": 0
-                                })
-                                        
-                                g.seek(0)
-                                json.dump(data, g)
-                                g.truncate()
-                            
-                            access_token = generate_access_token(id)
-                            refresh_token = generate_refresh_token(id, 0)
-                            
-                            return jsonify({"message": "Verification successful, account created.", "access_token": access_token, "refresh_token": refresh_token}), 201
+                        access_token = generate_access_token(id)
+                        refresh_token = generate_refresh_token(id, 0)
                         
-                        case "2fa":
-                            access_token = generate_access_token(id)
-                            refresh_token = generate_refresh_token(id, user["token_version"])
-                            
-                            return jsonify({"message": "Successfully authorized", "access_token": access_token, "refresh_token": refresh_token}), 200
+                        return jsonify({"message": "Verification successful, account created.", "access_token": access_token, "refresh_token": refresh_token}), 201
                     
-                else:
-                    return jsonify({"error": "Invalid OTP"}), 401
+                    case "2fa":
+                        for user in database["users"]:
+                            if user["id"] == user_data["id"]:
+                                user["token_version"] += 1
+                                
+                                database_file.seek(0)
+                                json.dump(database, database_file)
+                                database_file.truncate()
+                        
+                                access_token = generate_access_token(id)
+                                refresh_token = generate_refresh_token(id, user["token_version"])
+                        
+                                return jsonify({"message": "Successfully authorized", "access_token": access_token, "refresh_token": refresh_token}), 200
+                    
+            else:
+                return jsonify({"error": "Invalid OTP"}), 401
     return jsonify({"error": "User not found"}), 404
                             
 @app.route("/api/auth/login", methods=["POST"])
 def login():
     user_data = request.json
     
-    with open("database.json", "r+") as f:
-        data = json.load(f)
-        
-        for user in data["users"]:
-            if user["email"] == user_data["email"] and user["password"] == user_data["password"] and user["username"] == user_data["username"]:
-                with open("cache.json", "r+") as f:
-                    cache_data = json.load(f)
-        
-                    x = datetime.now()            
-        
-                    for user in cache_data:
-                        if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
-                            cache_data.remove(user)
+    database_file = open("database.json", "r")
+    cache_file = open("cache.json", "r+")
 
-                    user["purpose"] = "2fa"
-                    user["expiry"] = x + timedelta(minutes=30)
+    database = json.load(database_file)
+    cache = json.load(cache_file)
+        
+    for user in database["users"]:
+        if user["email"] == user_data["email"] and user["password"] == user_data["password"] and user["username"] == user_data["username"]:
+            x = datetime.now()            
 
-                    cache_data.append(user)
+            for user in cache:
+                if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
+                    cache.remove(user)
+
+            user["purpose"] = "2fa"
+            user["expiry"] = x + timedelta(minutes=30)
+
+            cache.append(user)
+    
+            cache_file.seek(0)
+            json.dump(cache, cache_file)
+            cache_file.truncate()
             
-                    f.seek(0)
-                    json.dump(cache_data, f)
-                    f.truncate()
-                return json.dumps({"message": "Login successfull please follow with 2fa"}), 200
-            else:
-                return json.dumps({"message": "Invalid Credentials"}), 401
+            return json.dumps({"message": "Login successfull please follow with 2fa"}), 200
+        else:
+            return json.dumps({"message": "Invalid Credentials"}), 401
                 
 @app.route("/api/auth/refresh", methods=["POST"])
 def refresh_token():
@@ -213,7 +207,7 @@ def hello_world():
     
 @app.route("/api/notes/get", methods=["GET"])
 def get_note():
-    access_token = request.headers.get("Authorization").split(" ")[1]
+    access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
     if decoded == "expired":
         return jsonify({"message": "Access token expired"}), 401
@@ -222,8 +216,12 @@ def get_note():
     else:    
         user_id = decoded["user_id"]
         
-        with open("notes.json", "r") as f:
-            return json.loads(f.read())[user_id]["notes"]
+        notes_file = open("notes.json", "r")
+        notes = json.load(notes_file)
+        
+        print(notes[user_id]["notes"])
+        
+        return notes[user_id]["notes"]
 
 if __name__ == "__main__":
     app.run(debug=True)
