@@ -1,11 +1,12 @@
 from flask import Flask, json, request, jsonify
 from dotenv import load_dotenv
 from Crypto.Cipher import AES
-from datetime import datetime, timedelta
 import random
 import pyotp
 import os
 import jwt
+import base64
+import time
 
 load_dotenv()
 app = Flask(__name__)
@@ -15,6 +16,7 @@ app = Flask(__name__)
 # print(ciphertext)
 
 # TODO: implicit file closing
+# TODO: use time instead of datetime for all expiry?
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 REFRESH_SECRET_KEY = os.getenv("REFRESH_KEY")
@@ -23,7 +25,7 @@ def generate_access_token(user_id):
     return jwt.encode(
         {
             "user_id": user_id,
-            "exp": datetime.utcnow() + timedelta(minutes=5)
+            "exp": int(time.time()) + 300
         },
         SECRET_KEY,
         algorithm="HS256"
@@ -33,7 +35,7 @@ def generate_refresh_token(user_id, token_version):
     return jwt.encode(
         {
             "user_id": user_id,
-            "exp": datetime.utcnow() + timedelta(days=1),
+            "exp": int(time.time()) + 604800,
             "token_version": token_version
         },
         REFRESH_SECRET_KEY,
@@ -61,15 +63,15 @@ def create_user():
         
     for user in database["users"]:
         if user["email"] == user_data["email"]:
-            return json.dumps({"message": "An account with this email already exists."}), 409
+            return json.dumps({"error": "An account with this email already exists."}), 409
         if user["username"] == user_data["username"]:
-            return json.dumps({"message": "This username is already taken."}), 409
+            return json.dumps({"error": "This username is already taken."}), 409
     
-    x = datetime.now()            
+    x = int(time.time())        
     
     # TODO: ig there could be duplicate IDs
     
-    id = str(x.strftime("%f%H%M"))
+    id = int(time.time())
     
     # TODO: Fix the user ID fields, they are kinda confusing here
     
@@ -77,10 +79,10 @@ def create_user():
     
     if not id in database:
         for user in cache:
-            if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
+            if x >= user["expiry"]:
                 cache.remove(user)
                 
-        user_data["expiry"] = x + timedelta(minutes=30)
+        user_data["expiry"] = x + 1800
         user_data["id"] = str(id)
         user_data["otp_key"] = otp_key
         user_data["purpose"] = "new_account"
@@ -139,18 +141,10 @@ def verify_account():
                         return jsonify({"message": "Verification successful, account created.", "access_token": access_token, "refresh_token": refresh_token}), 201
                     
                     case "2fa":
-                        for user in database["users"]:
-                            if user["id"] == user_data["id"]:
-                                user["token_version"] += 1
-                                
-                                database_file.seek(0)
-                                json.dump(database, database_file)
-                                database_file.truncate()
-                        
-                                access_token = generate_access_token(id)
-                                refresh_token = generate_refresh_token(id, user["token_version"])
-                        
-                                return jsonify({"message": "Successfully authorized", "access_token": access_token, "refresh_token": refresh_token}), 200
+                        access_token = generate_access_token(id)
+                        refresh_token = generate_refresh_token(id, cache_user["token_version"])
+                
+                        return jsonify({"message": "Successfully authorized", "access_token": access_token, "refresh_token": refresh_token}), 200
                     
             else:
                 return jsonify({"error": "Invalid OTP"}), 401
@@ -168,14 +162,14 @@ def login():
         
     for user in database["users"]:
         if user["email"] == user_data["email"] and user["password"] == user_data["password"] and user["username"] == user_data["username"]:
-            x = datetime.now()            
+            x = int(time.time())
 
             for user in cache:
-                if x >= datetime.strptime(user["expiry"], "%a, %d %b %Y %H:%M:%S %Z"):
+                if x >= user["expiry"]:
                     cache.remove(user)
 
             user["purpose"] = "2fa"
-            user["expiry"] = x + timedelta(minutes=30)
+            user["expiry"] = x + 1800
 
             cache.append(user)
     
@@ -184,35 +178,56 @@ def login():
             cache_file.truncate()
             
             return json.dumps({"message": "Login successfull please follow with 2fa"}), 200
-        else:
-            return json.dumps({"message": "Invalid Credentials"}), 401
-                
-@app.route("/api/auth/refresh", methods=["POST"])
-def refresh_token():
-    refresh_token = request.json["refresh_token"]
-    decoded = verify_token(refresh_token, REFRESH_SECRET_KEY)
-
-    if decoded == "expired":
-        return jsonify({"message": "Refresh token expired"}), 401
-    elif decoded == "invalid":
-        return jsonify({"message": "Invalid token"}), 401
-    else:
-        new_access_token = generate_access_token(decoded["user_id"])
-        return jsonify({"access_token": new_access_token}), 200
         
-@app.route("/api/notes/new", methods=["POST"])
-def hello_world():
-    print(json.loads(request.data))
-    return json.dumps({"success":True}), 201
-    
-@app.route("/api/notes/get", methods=["GET"])
-def get_note():
+    return json.dumps({"error": "Invalid Credentials"}), 401
+        
+@app.route("/api/auth/logout", methods=["GET"])
+def logout():
+    database_file = open("database.json", "r+")
+    database = json.load(database_file)
+
     access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
     if decoded == "expired":
-        return jsonify({"message": "Access token expired"}), 401
+        return jsonify({"error": "Access token expired"}), 401
     elif decoded == "invalid":
-        return jsonify({"message": "Invalid token"}), 401
+        return jsonify({"error": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        
+        for user in database["users"]:
+            if user["id"] == user_id:
+                user["token_version"] += 1
+                
+                database_file.seek(0)
+                json.dump(database, database_file)
+                database_file.truncate()
+                
+                return json.dumps({"message": "Successfully logged out"}), 200
+            
+    return json.dumps({"error": "User not found"}), 404               
+
+@app.route("/api/auth/refresh", methods=["POST"])
+def refresh_token():
+    refresh_token = request.headers.get("Authorization")
+    decoded = verify_token(refresh_token, REFRESH_SECRET_KEY)
+
+    if decoded == "expired":
+        return jsonify({"error": "Refresh token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
+    else:
+        new_access_token = generate_access_token(decoded["user_id"])
+        return jsonify({"access_token": new_access_token}), 200
+    
+@app.route("/api/notes/get", methods=["GET"])
+def get_token():
+    access_token = request.headers.get("Authorization")
+    decoded = verify_token(access_token, SECRET_KEY)
+    if decoded == "expired":
+        return jsonify({"error": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
     else:    
         user_id = decoded["user_id"]
         
@@ -222,6 +237,16 @@ def get_note():
         print(notes[user_id]["notes"])
         
         return notes[user_id]["notes"]
+    
+@app.route("/api/notes/create", methods=["POST"])
+def create_note():
+    print(json.loads(request.data))
+    return json.dumps({"success":True}), 201
+
+@app.route("/api/notes/delete", methods=["GET"])
+def delete_token():
+    print(json.loads(request.data))
+    return json.dumps({"success":True}), 201
 
 if __name__ == "__main__":
     app.run(debug=True)

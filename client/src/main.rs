@@ -11,6 +11,9 @@ use std::io::BufRead;
 use std::env;
 use std::fs::OpenOptions;
 use reqwest::header::*;
+use base64::prelude::*;
+use base64::engine::general_purpose::STANDARD;
+use chrono::{Duration, Utc};
 
 const HOST: &str = "http://localhost:5000";
 const STORAGE_PATH: &str = "./.env";
@@ -100,11 +103,26 @@ fn write_env(key: &str, value: &str) {
 }
 
 fn read_env(key: &str) -> String {
-    env::var(key).expect(format!("{} env variable is unset.", key).as_str())
+    env::var(key).expect(&format!("{} env variable is unset.", key))
 }
 
+async fn refresh_token(client: &Client) {
+    let mut headers = HeaderMap::new();
+    headers.insert(AUTHORIZATION, read_env("REFRESH_TOKEN").parse().unwrap());
+    let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
+    let status = refresh.status();
+    let json = get_request_json(refresh).await;
 
-#[tokio::main]
+    if status == 200 {
+        write_env("ACCESS_TOKEN", json["access_token"].as_str().unwrap());
+        println!("Succesfully refreshed access token.")
+    } else if status == 400 {
+        eprintln!("Error while refreshing access_token: {}\nPlease try to log in again", json["error"]);
+        return
+    }
+}
+
+#[tokio::main]  
 async fn main() {
     dotenv().ok();
 
@@ -113,18 +131,44 @@ async fn main() {
     // let ACCESS_TOKEN: String = read_env("ACCESS_TOKEN");
 
     let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        println!("Usage: todoterminal <command> [arguments]");
+        return
+    }
+
     let client = reqwest::Client::new();
 
     let mut input = String::new();
 
-    println!("Usage: todoterminal <command> [arguments]");
+    let access_token = read_env("ACCESS_TOKEN");
+    let parts: Vec<&str> = access_token.split('.').collect();
+    
+    let mut refresh = false;
+
+    if parts.len() == 3 {
+        let padded_encoded = format!("{}{}", parts[1], "=".repeat((4 - parts[1].len() % 4) % 4));
+        let decoded = BASE64_STANDARD.decode(padded_encoded).unwrap();
+
+        let payload_string = &String::from_utf8(decoded).expect("Error converting bytes to string");
+        let payload = serde_json::from_str::<serde_json::Value>(payload_string).unwrap();
+
+        let expiry = payload["exp"].as_i64().unwrap();
+        let current_time = Utc::now().timestamp();
+        
+        if current_time > expiry {
+            refresh = true;
+        }
+    } else {
+        refresh = true;
+    }
+
+    if refresh {
+        refresh_token(&client).await;
+    }
+    
+    
     match args[1].as_str() {
-        "create" => {
-
-        }
-        "delete" => {
-
-        }
         "notes" => {
             if args[2] == "list" {
                 let mut headers = HeaderMap::new();
@@ -135,10 +179,51 @@ async fn main() {
 
                 println!("{}", json_response);
             }
+            if args[2] == "create" {
+
+            }
         }
         "account" => {
             if args[2] == "login" {
+                let username = get_input(&mut input, "Please enter your desired username:");
+                println!("Your username is: {}", username);
 
+                let email = get_input(&mut input, "Please enter your email address:");
+                println!("Your email address is: {}", email);
+
+                let password = get_input(&mut input, "Please enter your password:");
+                println!("Your password is: {}", password);
+
+                let mut data = HashMap::new();
+                data.insert("username", username);
+                data.insert("password", password);
+                data.insert("email", email);
+
+                let login = post_request(&client, &data, HeaderMap::new(), "/api/auth/login").await;
+                let status = login.status();
+                let json = get_request_json(login).await;
+
+                if status == 200 {
+                    println!("{}", json["message"].as_str().unwrap())
+                } else if status == 401 {
+                    eprintln!("Error while logging in: {}", json["error"].as_str().unwrap())
+                }
+            }
+            if args[2] == "logout" {
+                let mut headers = HeaderMap::new();
+                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                let logout = get_request(&client, headers, "/api/auth/logout").await;
+
+                let status = logout.status();
+                let json = get_request_json(logout).await;
+
+                if status == 200 {
+                    println!("{}", json["message"].as_str().unwrap());
+                    write_env("ACCESS_TOKEN", "");
+                } else {
+                    println!("Error while logging out: {}", json["error"].as_str().unwrap())
+                }
             }
             if args[2] == "create" {
                 let username = get_input(&mut input, "Please enter your desired username:");
