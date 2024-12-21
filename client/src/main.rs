@@ -89,9 +89,11 @@ fn read_env(key: &str) -> String {
 }
 
 fn get_tracked_files(dir: &str) -> Vec<String> {
+    let current_dir = env::current_dir().expect("Failed to get current directory");
+    let full_path = current_dir.join(dir);
     let output = Command::new("git")
         .arg("ls-files")
-        .arg(dir)
+        .current_dir(full_path)
         .output().unwrap();
 
     if !output.status.success() {
@@ -108,6 +110,7 @@ fn get_tracked_files(dir: &str) -> Vec<String> {
 }
 
 fn find_todo(file_path: &Path, regex: Regex) -> Vec<String> {
+    println!("{}", file_path.display());
     let mut todos = Vec::new();
     
     let contents = fs::read_to_string(file_path).unwrap();
@@ -231,22 +234,51 @@ async fn main() {
                     println!("{}", json["error"].as_str().unwrap())
                 }
             }
+
+            // TODO: Fix wonky import code
             if args[2] == "import" {
+                let path = if args[3] == "git" {
+                    let output = Command::new("git")
+                        .arg("clone")
+                        .arg(args[4].clone())
+                        .arg(args[5].clone())
+                        .output().unwrap();
+                    args[5].clone()
+                } else if args[3] == "fs" {
+                    args[4].clone()
+                } else {
+                    ".".to_string()
+                };
                 let mut string_regex = get_input(&mut input, "(Optional) enter custom TODO matching regex:");
                 let regex = if !string_regex.is_empty() {
                     Regex::new(&string_regex).expect("Invalid regex")
                 } else {
-                    Regex::new(r"(?:\/\/TODO:|# TODO:).*").expect("Invalid regex")
+                    Regex::new(r"(?:\/\/ TODO:|# TODO:).*").expect("Invalid regex")
                 };
  
-                for file in get_tracked_files("../") {
-                    println!("{:?}", file);
-                    println!("{:?}", find_todo(Path::new(&file), regex.clone()))
-                }
-                if args[3] == "git" {
+                let mut success = true;
 
-                } else if args[3] == "fs" {
-//TODO:
+                for file in get_tracked_files(&path) {
+                    for todo in find_todo(Path::new(&(path.clone()+"/"+&file)), regex.clone()) {
+                        let mut headers = HeaderMap::new();
+                        headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                        let mut data = HashMap::new();
+                        data.insert("content", todo);
+
+                        let create = post_request(&client, &data, headers, "/api/todos/create").await;
+                        let status = create.status();
+                        let json = get_request_json(create).await;
+
+                        if status == 401 {
+                            success = false;
+                            println!("{}", json["error"].as_str().unwrap())
+                        }
+                    }
+                }
+
+                if success {
+                    println!("Successfully imported all TODOs")
                 }
             }
         }
