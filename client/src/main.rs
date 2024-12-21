@@ -1,19 +1,18 @@
 use std::collections::HashMap;
-use std::io;
-use reqwest::{ Response, Client };
-use serde_json::Value;
+use std::process::Command;
 use std::path::Path;
 use std::fs::File;
 use std::fs;
-use std::io::Write;
-use dotenv::dotenv;
-use std::io::BufRead;
+use std::io::{ Write, BufRead};
+use std::io;
 use std::env;
-use std::fs::OpenOptions;
+use serde_json::Value;
+use dotenv::dotenv;
 use reqwest::header::*;
+use reqwest::{ Response, Client };
 use base64::prelude::*;
-use base64::engine::general_purpose::STANDARD;
-use chrono::{Duration, Utc};
+use chrono::Utc;
+use regex::Regex;
 
 const HOST: &str = "http://localhost:5000";
 const STORAGE_PATH: &str = "./.env";
@@ -48,26 +47,9 @@ fn get_input(input: &mut String, question: &str) -> String {
 }
 
 fn write_env(key: &str, value: &str) {
-    // let path = Path::new(STORAGE_PATH);
-
-    // let mut file = if !path.exists() {
-    //     File::create(&path)
-    //         .expect("Failed to create file")
-    // } else {
-    //     File::options()
-    //         .write(true)
-    //         .append(true)
-    //         .open(&path)
-    //         .expect("Failed to open file")
-    // };
-
-    // if let Err(e) = file.write_all(text) {
-    //     eprintln!("Failed to write to file: {}", e);
-    // }
-
     let path = Path::new(STORAGE_PATH);
 
-    let mut file = if !path.exists() {
+    let file = if !path.exists() {
         File::create(&path)
             .expect("Failed to create file")
     } else {
@@ -106,29 +88,44 @@ fn read_env(key: &str) -> String {
     env::var(key).expect(&format!("{} env variable is unset.", key))
 }
 
-async fn refresh_token(client: &Client) {
-    let mut headers = HeaderMap::new();
-    headers.insert(AUTHORIZATION, read_env("REFRESH_TOKEN").parse().unwrap());
-    let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
-    let status = refresh.status();
-    let json = get_request_json(refresh).await;
+fn get_tracked_files(dir: &str) -> Vec<String> {
+    let output = Command::new("git")
+        .arg("ls-files")
+        .arg(dir)
+        .output().unwrap();
 
-    if status == 200 {
-        write_env("ACCESS_TOKEN", json["access_token"].as_str().unwrap());
-        println!("Succesfully refreshed access token.")
-    } else if status == 400 {
-        eprintln!("Error while refreshing access_token: {}\nPlease try to log in again", json["error"]);
-        return
+    if !output.status.success() {
+        eprintln!("Failed to get git files");
+        return vec![]
     }
+
+    let files = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.to_string())
+        .collect();
+
+    files
+}
+
+fn find_todo(file_path: &Path, regex: Regex) -> Vec<String> {
+    let mut todos = Vec::new();
+    
+    let contents = fs::read_to_string(file_path).unwrap();
+
+    for mat in regex.find_iter(&contents) {
+        let start = mat.start();
+        let line_number = contents[..start].lines().count();
+        let matched_text = mat.as_str().trim();
+
+        todos.push(format!("[{}:{}]: {}", file_path.display(), line_number + 1, matched_text));
+    }
+
+    todos
 }
 
 #[tokio::main]  
 async fn main() {
     dotenv().ok();
-
-    // let ID: String = read_env("ID");
-    // let REFRESH_TOKEN: String = read_env("REFRESH_TOKEN");
-    // let ACCESS_TOKEN: String = read_env("ACCESS_TOKEN");
 
     let args: Vec<String> = env::args().collect();
 
@@ -164,23 +161,93 @@ async fn main() {
     }
 
     if refresh {
-        refresh_token(&client).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, read_env("REFRESH_TOKEN").parse().unwrap());
+        let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
+        let status = refresh.status();
+        let json = get_request_json(refresh).await;
+    
+        if status == 200 {
+            write_env("ACCESS_TOKEN", json["access_token"].as_str().unwrap());
+            println!("Succesfully refreshed access token.")
+        } else if status == 400 {
+            eprintln!("Error while refreshing access_token: {}\nPlease try to log in again", json["error"]);
+            return
+        }
     }
     
     
     match args[1].as_str() {
-        "notes" => {
+        "todos" => {
             if args[2] == "list" {
                 let mut headers = HeaderMap::new();
                 headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
 
-                let notes = get_request(&client, headers, "/api/notes/get").await;
-                let json_response = get_request_json(notes).await;
+                let todos = get_request(&client, headers, "/api/todos/get").await;
+                let json_response = get_request_json(todos).await;
 
-                println!("{}", json_response);
+                println!("Todo:");
+                if let Some(items) = json_response.as_array() {
+                    for item in items {
+                        println!("[{}]: {}", item["id"], item["content"]);
+                    }
+                }
+            }
+            if args[2] == "delete" {
+                if args.get(3).is_none() {
+                    eprintln!("No todo ID provided");
+                    return
+                }
+
+                let mut headers = HeaderMap::new();
+                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                let mut data = HashMap::new();
+                data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
+                let delete = post_request(&client, &data, headers, "/api/todos/delete").await;
+                let status = delete.status();
+                let json = get_request_json(delete).await;
+
+                if status == 200 {
+                    println!("{}", json["message"].as_str().unwrap())
+                } else if status == 401 {
+                    println!("{}", json["error"].as_str().unwrap())
+                }
             }
             if args[2] == "create" {
+                let mut headers = HeaderMap::new();
+                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
 
+                let mut data = HashMap::new();
+                data.insert("content", args[3].clone());
+
+                let create = post_request(&client, &data, headers, "/api/todos/create").await;
+                let status = create.status();
+                let json = get_request_json(create).await;
+
+                if status == 201 {
+                    println!("{}", json["message"].as_str().unwrap())
+                } else if status == 401 {
+                    println!("{}", json["error"].as_str().unwrap())
+                }
+            }
+            if args[2] == "import" {
+                let mut string_regex = get_input(&mut input, "(Optional) enter custom TODO matching regex:");
+                let regex = if !string_regex.is_empty() {
+                    Regex::new(&string_regex).expect("Invalid regex")
+                } else {
+                    Regex::new(r"(?:\/\/TODO:|# TODO:).*").expect("Invalid regex")
+                };
+ 
+                for file in get_tracked_files("../") {
+                    println!("{:?}", file);
+                    println!("{:?}", find_todo(Path::new(&file), regex.clone()))
+                }
+                if args[3] == "git" {
+
+                } else if args[3] == "fs" {
+//TODO:
+                }
             }
         }
         "account" => {
@@ -240,7 +307,7 @@ async fn main() {
                 data.insert("password", password);
                 data.insert("email", email);
 
-                let create_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/new").await;
+                let create_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/create").await;
 
                 if create_account.status() == 201 {
                     let json_response = get_request_json(create_account).await;
@@ -297,8 +364,7 @@ async fn main() {
             }
         }
         _ => {
-
+            println!("Error recognizing command")
         }
     }
-    println!("{}", args[1]);
 }

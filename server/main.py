@@ -1,11 +1,9 @@
 from flask import Flask, json, request, jsonify
 from dotenv import load_dotenv
 from Crypto.Cipher import AES
-import random
 import pyotp
 import os
 import jwt
-import base64
 import time
 
 load_dotenv()
@@ -15,7 +13,7 @@ app = Flask(__name__)
 # ciphertext, tag = cipher.encrypt_and_digest(b"crazy")
 # print(ciphertext)
 
-# TODO: implicit file closing
+# TODO: fix file opening/ closing race conditions
 # TODO: use time instead of datetime for all expiry?
 
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -51,15 +49,28 @@ def verify_token(token, secret):
     except jwt.InvalidTokenError:
         return "invalid"
     
-@app.route("/api/auth/new", methods=["POST"])
+def read_file(name):
+    file = open(name, "r")
+    content = json.load(file)
+    
+    file.close()
+    
+    return content 
+    
+def write_file(name, content):
+    file = open(name, "w")
+
+    file.seek(0)
+    json.dump(content, file)
+    file.truncate()
+    file.close()
+    
+@app.route("/api/auth/create", methods=["POST"])
 def create_user():
     user_data = request.json
     
-    database_file = open("database.json", "r")
-    cache_file = open("cache.json", "r+")
-    
-    database = json.load(database_file)
-    cache = json.load(cache_file)
+    database = read_file("database.json")
+    cache = read_file("cache.json")
         
     for user in database["users"]:
         if user["email"] == user_data["email"]:
@@ -88,9 +99,7 @@ def create_user():
         user_data["purpose"] = "new_account"
         cache.append(user_data)
         
-        cache_file.seek(0)
-        json.dump(cache, cache_file)
-        cache_file.truncate()
+        write_file("cache.json", cache)
         
         totp = pyotp.TOTP(otp_key)
         uri = totp.provisioning_uri(name="ToDoTerminal", issuer_name="2FA")
@@ -102,11 +111,10 @@ def create_user():
 @app.route("/api/auth/verify", methods=["POST"])
 def verify_account():
     user_data = request.json
-    cache_file = open("cache.json", "r+")
-    database_file = open("database.json", "r+")
 
-    cache = json.load(cache_file)
-    database = json.load(database_file)
+    cache = read_file("cache.json")
+    database = read_file("database.json")
+    todos = read_file("todos.json")
         
     for cache_user in cache:
         if cache_user["id"] == user_data["id"]:
@@ -114,9 +122,7 @@ def verify_account():
             if totp.verify(user_data["otp_code"]):
                 cache.remove(cache_user)
                     
-                cache_file.seek(0)
-                json.dump(cache, cache_file)
-                cache_file.truncate()
+                write_file("cache.json", cache)
                                         
                 id = cache_user["id"]
                         
@@ -130,10 +136,12 @@ def verify_account():
                             "id": id,
                             "token_version": 0
                         })
+                        
+                        if todos.get(id) == None:
+                            todos[id] = {"todos": []}
                                 
-                        database_file.seek(0)
-                        json.dump(database, database_file)
-                        database_file.truncate()
+                        write_file("todos.json", todos)
+                        write_file("database.json", database)
                         
                         access_token = generate_access_token(id)
                         refresh_token = generate_refresh_token(id, 0)
@@ -153,12 +161,9 @@ def verify_account():
 @app.route("/api/auth/login", methods=["POST"])
 def login():
     user_data = request.json
-    
-    database_file = open("database.json", "r")
-    cache_file = open("cache.json", "r+")
 
-    database = json.load(database_file)
-    cache = json.load(cache_file)
+    database = read_file("database.json")
+    cache = read_file("cache.json")
         
     for user in database["users"]:
         if user["email"] == user_data["email"] and user["password"] == user_data["password"] and user["username"] == user_data["username"]:
@@ -173,18 +178,15 @@ def login():
 
             cache.append(user)
     
-            cache_file.seek(0)
-            json.dump(cache, cache_file)
-            cache_file.truncate()
-            
+            write_file("cache.json", cache)
+                        
             return json.dumps({"message": "Login successfull please follow with 2fa"}), 200
         
     return json.dumps({"error": "Invalid Credentials"}), 401
         
 @app.route("/api/auth/logout", methods=["GET"])
 def logout():
-    database_file = open("database.json", "r+")
-    database = json.load(database_file)
+    database = read_file("database.json")
 
     access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
@@ -199,9 +201,7 @@ def logout():
             if user["id"] == user_id:
                 user["token_version"] += 1
                 
-                database_file.seek(0)
-                json.dump(database, database_file)
-                database_file.truncate()
+                write_file("database.json", database)
                 
                 return json.dumps({"message": "Successfully logged out"}), 200
             
@@ -220,7 +220,7 @@ def refresh_token():
         new_access_token = generate_access_token(decoded["user_id"])
         return jsonify({"access_token": new_access_token}), 200
     
-@app.route("/api/notes/get", methods=["GET"])
+@app.route("/api/todos/get", methods=["GET"])
 def get_token():
     access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
@@ -231,22 +231,59 @@ def get_token():
     else:    
         user_id = decoded["user_id"]
         
-        notes_file = open("notes.json", "r")
-        notes = json.load(notes_file)
+        todos_file = open("todos.json", "r")
+        todos = json.load(todos_file)
         
-        print(notes[user_id]["notes"])
+        print(todos[user_id]["todos"])
         
-        return notes[user_id]["notes"]
+        return todos[user_id]["todos"]
     
-@app.route("/api/notes/create", methods=["POST"])
+@app.route("/api/todos/create", methods=["POST"])
 def create_note():
-    print(json.loads(request.data))
-    return json.dumps({"success":True}), 201
+    todo_content = json.loads(request.data)["content"]
+    
+    access_token = request.headers.get("Authorization")
+    decoded = verify_token(access_token, SECRET_KEY)
+    
+    if decoded == "expired":
+        return jsonify({"error": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        
+        todos = read_file("todos.json")
+        
+        todos[user_id]["todos"].append({"content": todo_content, "id": todos[user_id]["count"]})
+        
+        todos[user_id]["count"] += 1
 
-@app.route("/api/notes/delete", methods=["GET"])
+        write_file("todos.json", todos)
+    
+        return json.dumps({"message": "Successfully created new todo"}), 201
+
+@app.route("/api/todos/delete", methods=["POST"])
 def delete_token():
-    print(json.loads(request.data))
-    return json.dumps({"success":True}), 201
+    access_token = request.headers.get("Authorization")
+    decoded = verify_token(access_token, SECRET_KEY)
+    
+    if decoded == "expired":
+        return jsonify({"error": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        todo_id = int(json.loads(request.data)["id"])
+        
+        todos = read_file("todos.json")
+                
+        for todo in todos[user_id]["todos"]:
+            if todo["id"] == todo_id:
+                todos[user_id]["todos"].remove(todo)
+            
+        write_file("todos.json", todos)
+        
+        return jsonify({"message": "Succesfully deleted todo"}), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
