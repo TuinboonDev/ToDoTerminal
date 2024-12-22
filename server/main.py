@@ -221,7 +221,7 @@ def refresh_token():
         return jsonify({"access_token": new_access_token}), 200
     
 @app.route("/api/todos/get", methods=["GET"])
-def get_token():
+def get_todos():
     access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
     if decoded == "expired":
@@ -239,7 +239,7 @@ def get_token():
         return todos[user_id]["todos"]
     
 @app.route("/api/todos/create", methods=["POST"])
-def create_note():
+def create_todo():
     todo_content = json.loads(request.data)["content"]
     
     access_token = request.headers.get("Authorization")
@@ -254,7 +254,7 @@ def create_note():
         
         todos = read_file("todos.json")
         
-        todos[user_id]["todos"].append({"content": todo_content, "id": todos[user_id]["count"]})
+        todos[user_id]["todos"].append({"content": todo_content, "id": todos[user_id]["count"], "completed": False})
         
         todos[user_id]["count"] += 1
 
@@ -263,7 +263,7 @@ def create_note():
         return json.dumps({"message": "Successfully created new todo"}), 201
 
 @app.route("/api/todos/delete", methods=["POST"])
-def delete_token():
+def delete_todo():
     access_token = request.headers.get("Authorization")
     decoded = verify_token(access_token, SECRET_KEY)
     
@@ -284,6 +284,52 @@ def delete_token():
         write_file("todos.json", todos)
         
         return jsonify({"message": "Succesfully deleted todo"}), 200
+
+@app.route("/api/todos/complete", methods=["POST"])
+def complete_todo():
+    access_token = request.headers.get("Authorization")
+    decoded = verify_token(access_token, SECRET_KEY)
+    
+    if decoded == "expired":
+        return jsonify({"error": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        todo_id = int(json.loads(request.data)["id"])
+        
+        todos = read_file("todos.json")
+                
+        for todo in todos[user_id]["todos"]:
+            if todo["id"] == todo_id:
+                todo["completed"] = True
+            
+        write_file("todos.json", todos)
+        
+        return jsonify({"message": "Succesfully completed todo"}), 200
+
+@app.route("/api/todos/uncomplete", methods=["POST"])
+def uncomplete_todo():
+    access_token = request.headers.get("Authorization")
+    decoded = verify_token(access_token, SECRET_KEY)
+    
+    if decoded == "expired":
+        return jsonify({"error": "Access token expired"}), 401
+    elif decoded == "invalid":
+        return jsonify({"error": "Invalid token"}), 401
+    else:    
+        user_id = decoded["user_id"]
+        todo_id = int(json.loads(request.data)["id"])
+        
+        todos = read_file("todos.json")
+                
+        for todo in todos[user_id]["todos"]:
+            if todo["id"] == todo_id:
+                todo["completed"] = False
+            
+        write_file("todos.json", todos)
+        
+        return jsonify({"message": "Succesfully uncompleted todo"}), 200
 
 if __name__ == "__main__":
     app.run(debug=True)

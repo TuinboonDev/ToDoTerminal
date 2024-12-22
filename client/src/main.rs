@@ -16,7 +16,9 @@ use regex::Regex;
 
 const HOST: &str = "http://localhost:5000";
 const STORAGE_PATH: &str = "./.env";
-
+const CHECKMARK: &str = "✔";
+const X: &str = "✖";
+ 
 async fn post_request(client: &Client, json: &HashMap<&str, String>, headers: HeaderMap, endpoint: &str) -> Response {
     client.post(HOST.to_owned() +  endpoint)
         .json(&json)
@@ -89,11 +91,10 @@ fn read_env(key: &str) -> String {
 }
 
 fn get_tracked_files(dir: &str) -> Vec<String> {
-    let current_dir = env::current_dir().expect("Failed to get current directory");
-    let full_path = current_dir.join(dir);
+    let absolute_path = fs::canonicalize(dir).unwrap();
     let output = Command::new("git")
         .arg("ls-files")
-        .current_dir(full_path)
+        .current_dir(absolute_path)
         .output().unwrap();
 
     if !output.status.success() {
@@ -110,7 +111,9 @@ fn get_tracked_files(dir: &str) -> Vec<String> {
 }
 
 fn find_todo(file_path: &Path, regex: Regex) -> Vec<String> {
-    println!("{}", file_path.display());
+    if file_path.display().to_string().ends_with(".png") {
+        return vec![]
+    }
     let mut todos = Vec::new();
     
     let contents = fs::read_to_string(file_path).unwrap();
@@ -182,193 +185,247 @@ async fn main() {
     
     match args[1].as_str() {
         "todos" => {
-            if args[2] == "list" {
-                let mut headers = HeaderMap::new();
-                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+            if args.len() < 3 {
+                println!("Missing argument after \"todos\".");
+                return
+            }
 
-                let todos = get_request(&client, headers, "/api/todos/get").await;
-                let json_response = get_request_json(todos).await;
-
-                println!("Todo:");
-                if let Some(items) = json_response.as_array() {
-                    for item in items {
-                        println!("[{}]: {}", item["id"], item["content"]);
+            match args[2].as_str() {
+                "list" => {
+                    if args.len() > 3 {
+                        println!("Extra argument after \"list\" was unneeded.");
+                        return
                     }
-                }
-            }
-            if args[2] == "delete" {
-                if args.get(3).is_none() {
-                    eprintln!("No todo ID provided");
-                    return
-                }
 
-                let mut headers = HeaderMap::new();
-                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
 
-                let mut data = HashMap::new();
-                data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
-                let delete = post_request(&client, &data, headers, "/api/todos/delete").await;
-                let status = delete.status();
-                let json = get_request_json(delete).await;
+                    let todos = get_request(&client, headers, "/api/todos/get").await;
+                    let json_response = get_request_json(todos).await;
 
-                if status == 200 {
-                    println!("{}", json["message"].as_str().unwrap())
-                } else if status == 401 {
-                    println!("{}", json["error"].as_str().unwrap())
-                }
-            }
-            if args[2] == "create" {
-                let mut headers = HeaderMap::new();
-                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
-
-                let mut data = HashMap::new();
-                data.insert("content", args[3].clone());
-
-                let create = post_request(&client, &data, headers, "/api/todos/create").await;
-                let status = create.status();
-                let json = get_request_json(create).await;
-
-                if status == 201 {
-                    println!("{}", json["message"].as_str().unwrap())
-                } else if status == 401 {
-                    println!("{}", json["error"].as_str().unwrap())
-                }
-            }
-
-            // TODO: Fix wonky import code
-            if args[2] == "import" {
-                let path = if args[3] == "git" {
-                    let output = Command::new("git")
-                        .arg("clone")
-                        .arg(args[4].clone())
-                        .arg(args[5].clone())
-                        .output().unwrap();
-                    args[5].clone()
-                } else if args[3] == "fs" {
-                    args[4].clone()
-                } else {
-                    ".".to_string()
-                };
-                let mut string_regex = get_input(&mut input, "(Optional) enter custom TODO matching regex:");
-                let regex = if !string_regex.is_empty() {
-                    Regex::new(&string_regex).expect("Invalid regex")
-                } else {
-                    Regex::new(r"(?:\/\/ TODO:|# TODO:).*").expect("Invalid regex")
-                };
- 
-                let mut success = true;
-
-                for file in get_tracked_files(&path) {
-                    for todo in find_todo(Path::new(&(path.clone()+"/"+&file)), regex.clone()) {
-                        let mut headers = HeaderMap::new();
-                        headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
-
-                        let mut data = HashMap::new();
-                        data.insert("content", todo);
-
-                        let create = post_request(&client, &data, headers, "/api/todos/create").await;
-                        let status = create.status();
-                        let json = get_request_json(create).await;
-
-                        if status == 401 {
-                            success = false;
-                            println!("{}", json["error"].as_str().unwrap())
+                    println!("Your TODOs:");
+                    if let Some(items) = json_response.as_array() {
+                        for item in items {
+                            println!("[{}:{}]: {}", if item["completed"].as_bool().unwrap() { CHECKMARK } else { X }, item["id"], item["content"]);
                         }
                     }
                 }
+                "delete" => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
 
-                if success {
-                    println!("Successfully imported all TODOs")
+                    let mut data = HashMap::new();
+                    data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
+                    let delete = post_request(&client, &data, headers, "/api/todos/delete").await;
+                    let status = delete.status();
+                    let json = get_request_json(delete).await;
+
+                    if status == 200 {
+                        println!("{}", json["message"].as_str().unwrap())
+                    } else if status == 401 {
+                        println!("{}", json["error"].as_str().unwrap())
+                    }
+                }
+                "create" => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                    let mut data = HashMap::new();
+                    data.insert("content", args[3].clone());
+
+                    let create = post_request(&client, &data, headers, "/api/todos/create").await;
+                    let status = create.status();
+                    let json = get_request_json(create).await;
+
+                    if status == 201 {
+                        println!("{}", json["message"].as_str().unwrap())
+                    } else if status == 401 {
+                        println!("{}", json["error"].as_str().unwrap())
+                    }
+                }
+                // TODO: Fix wonky import code
+                "import" => {
+                    if args.len() < 6 {
+                        println!("Usage: todoterminal todos import <fs|git> <path|github url>");
+                        return
+                    }
+                    let path = if args[3] == "git" {
+                        let output = Command::new("git")
+                            .arg("clone")
+                            .arg(args[4].clone())
+                            .arg(args[5].clone())
+                            .output().unwrap();
+
+                        if !output.status.success() {
+                            eprintln!("Failed to clone git repo");
+                            return
+                        }
+
+                        args[5].clone()
+                    } else if args[3] == "fs" {
+                        args[4].clone()
+                    } else {
+                        ".".to_string()
+                    };
+                    let string_regex = get_input(&mut input, "(Optional) enter custom TODO matching regex:");
+                    let regex = if !string_regex.is_empty() {
+                        Regex::new(&string_regex).expect("Invalid regex")
+                    } else {
+                        Regex::new(r"(?:\/\/ TODO:|# TODO:).*").expect("Invalid regex")
+                    };
+    
+                    let mut success = true;
+
+                    for file in get_tracked_files(&path) {
+                        for todo in find_todo(Path::new(&(path.clone()+"/"+&file)), regex.clone()) {
+                            let mut headers = HeaderMap::new();
+                            headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                            let mut data = HashMap::new();
+                            data.insert("content", todo);
+
+                            let create = post_request(&client, &data, headers, "/api/todos/create").await;
+                            let status = create.status();
+                            let json = get_request_json(create).await;
+
+                            if status == 401 {
+                                success = false;
+                                println!("{}", json["error"].as_str().unwrap())
+                            }
+                        }
+                    }
+
+                    if success {
+                        println!("Successfully imported all TODOs")
+                    }
+                }
+                "complete" => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                    let mut data = HashMap::new();
+                    data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
+                    let complete = post_request(&client, &data, headers, "/api/todos/complete").await;
+                    let status = complete.status();
+                    let json = get_request_json(complete).await;
+
+                    if status == 200 {
+                        println!("{}", json["message"].as_str().unwrap())
+                    } else if status == 401 {
+                        println!("{}", json["error"].as_str().unwrap())
+                    }
+                }
+                "uncomplete" => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                    let mut data = HashMap::new();
+                    data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
+                    let uncomplete = post_request(&client, &data, headers, "/api/todos/uncomplete").await;
+                    let status = uncomplete.status();
+                    let json = get_request_json(uncomplete).await;
+
+                    if status == 200 {
+                        println!("{}", json["message"].as_str().unwrap())
+                    } else if status == 401 {
+                        println!("{}", json["error"].as_str().unwrap())
+                    }
+                }
+                e => {
+                    println!("Error recognizing subcommand \"{}\"", e)
                 }
             }
         }
         "account" => {
-            if args[2] == "login" {
-                let username = get_input(&mut input, "Please enter your desired username:");
-                println!("Your username is: {}", username);
+            match args[2].as_str() {
+                "login" => {
+                    let username = get_input(&mut input, "Please enter your desired username:");
+                    println!("Your username is: {}", username);
 
-                let email = get_input(&mut input, "Please enter your email address:");
-                println!("Your email address is: {}", email);
+                    let email = get_input(&mut input, "Please enter your email address:");
+                    println!("Your email address is: {}", email);
 
-                let password = get_input(&mut input, "Please enter your password:");
-                println!("Your password is: {}", password);
+                    let password = get_input(&mut input, "Please enter your password:");
+                    println!("Your password is: {}", password);
 
-                let mut data = HashMap::new();
-                data.insert("username", username);
-                data.insert("password", password);
-                data.insert("email", email);
+                    let mut data = HashMap::new();
+                    data.insert("username", username);
+                    data.insert("password", password);
+                    data.insert("email", email);
 
-                let login = post_request(&client, &data, HeaderMap::new(), "/api/auth/login").await;
-                let status = login.status();
-                let json = get_request_json(login).await;
+                    let login = post_request(&client, &data, HeaderMap::new(), "/api/auth/login").await;
+                    let status = login.status();
+                    let json = get_request_json(login).await;
 
-                if status == 200 {
-                    println!("{}", json["message"].as_str().unwrap())
-                } else if status == 401 {
-                    eprintln!("Error while logging in: {}", json["error"].as_str().unwrap())
-                }
-            }
-            if args[2] == "logout" {
-                let mut headers = HeaderMap::new();
-                headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
-
-                let logout = get_request(&client, headers, "/api/auth/logout").await;
-
-                let status = logout.status();
-                let json = get_request_json(logout).await;
-
-                if status == 200 {
-                    println!("{}", json["message"].as_str().unwrap());
-                    write_env("ACCESS_TOKEN", "");
-                } else {
-                    println!("Error while logging out: {}", json["error"].as_str().unwrap())
-                }
-            }
-            if args[2] == "create" {
-                let username = get_input(&mut input, "Please enter your desired username:");
-                println!("Your desired username is: {}", username);
-
-                let email = get_input(&mut input, "Please enter your email address:");
-                println!("Your email address is: {}", email);
-
-                let password = get_input(&mut input, "Please enter your password:");
-                println!("Your password is: {}", password);
-
-                let mut data = HashMap::new();
-                data.insert("username", username);
-                data.insert("password", password);
-                data.insert("email", email);
-
-                let create_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/create").await;
-
-                if create_account.status() == 201 {
-                    let json_response = get_request_json(create_account).await;
-
-                    if let Err(e) = qr2term::print_qr(json_response["url"].as_str().unwrap()) {
-                        eprintln!("Error generating QR code: {}", e);
+                    if status == 200 {
+                        println!("{}", json["message"].as_str().unwrap())
+                    } else if status == 401 {
+                        eprintln!("Error while logging in: {}", json["error"].as_str().unwrap())
                     }
-
-                    let otp_code = get_input(&mut input, "Please scan the QR code with a 2FA app of your choice and write the code below:");
-
-                    let id = json_response["id"].as_str().unwrap().to_string();
-                    data.clear();
-                    data.insert("id", id.clone());
-                    data.insert("otp_code", otp_code);
-
-                    let verify_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/verify").await;
-
-                    if verify_account.status() == 201 {
-                        let json_response = get_request_json(verify_account).await;
-
-                        write_env("ID", &id);
-                        write_env("REFRESH_TOKEN", json_response["refresh_token"].as_str().unwrap());
-                        write_env("ACCESS_TOKEN", json_response["access_token"].as_str().unwrap());
-
-                        println!("good")
-                    }
-                } else {
-                    eprintln!("Account was not created")
                 }
+                "logout" => {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+
+                    let logout = get_request(&client, headers, "/api/auth/logout").await;
+
+                    let status = logout.status();
+                    let json = get_request_json(logout).await;
+
+                    if status == 200 {
+                        println!("{}", json["message"].as_str().unwrap());
+                        write_env("ACCESS_TOKEN", "");
+                    } else {
+                        println!("Error while logging out: {}", json["error"].as_str().unwrap())
+                    }
+                }
+                "create" => {
+                    let username = get_input(&mut input, "Please enter your desired username:");
+                    println!("Your desired username is: {}", username);
+
+                    let email = get_input(&mut input, "Please enter your email address:");
+                    println!("Your email address is: {}", email);
+
+                    let password = get_input(&mut input, "Please enter your password:");
+                    println!("Your password is: {}", password);
+
+                    let mut data = HashMap::new();
+                    data.insert("username", username);
+                    data.insert("password", password);
+                    data.insert("email", email);
+
+                    let create_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/create").await;
+
+                    if create_account.status() == 201 {
+                        let json_response = get_request_json(create_account).await;
+
+                        if let Err(e) = qr2term::print_qr(json_response["url"].as_str().unwrap()) {
+                            eprintln!("Error generating QR code: {}", e);
+                        }
+
+                        let otp_code = get_input(&mut input, "Please scan the QR code with a 2FA app of your choice and write the code below:");
+
+                        let id = json_response["id"].as_str().unwrap().to_string();
+                        data.clear();
+                        data.insert("id", id.clone());
+                        data.insert("otp_code", otp_code);
+
+                        let verify_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/verify").await;
+
+                        if verify_account.status() == 201 {
+                            let json_response = get_request_json(verify_account).await;
+
+                            write_env("ID", &id);
+                            write_env("REFRESH_TOKEN", json_response["refresh_token"].as_str().unwrap());
+                            write_env("ACCESS_TOKEN", json_response["access_token"].as_str().unwrap());
+
+                            println!("good")
+                        }
+                    } else {
+                        eprintln!("Account was not created")
+                    }
+                },
+                _ => {}
             }
         }
         "2fa" => {
