@@ -18,7 +18,7 @@ const HOST: &str = "http://localhost:5000";
 const STORAGE_PATH: &str = "./.env";
 const CHECKMARK: &str = "✔";
 const X: &str = "✖";
- 
+
 async fn post_request(client: &Client, json: &HashMap<&str, String>, headers: HeaderMap, endpoint: &str) -> Response {
     client.post(HOST.to_owned() +  endpoint)
         .json(&json)
