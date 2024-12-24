@@ -2,6 +2,12 @@
 name = "todoterminal"
 version = "0.1.0"
 edition = "2021"
+license = "ALL RIGHTS RESERVED"
+authors = ["Tuinboon <github@thijmens.nl>"]
+readme = "README.md"
+description = "A CLI tool for managing TODOs on a remote server"
+homepage = "https://github.com/TuinboonDev/ToDoTerminal/README.md"
+repository = "https://github.com/TuinboonDev/ToDoTerminal/"
 
 [dependencies]
 base64 = "0.22.1"

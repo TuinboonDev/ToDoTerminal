@@ -14,13 +14,12 @@ use base64::prelude::*;
 use chrono::Utc;
 use regex::Regex;
 
-const HOST: &str = "http://localhost:5000";
 const STORAGE_PATH: &str = "./.env";
-const CHECKMARK: &str = "✔";
-const X: &str = "✖";
+const CHECKMARK: &str = "V";
+const X: &str = "X";
 
 async fn post_request(client: &Client, json: &HashMap<&str, String>, headers: HeaderMap, endpoint: &str) -> Response {
-    client.post(HOST.to_owned() +  endpoint)
+    client.post(read_env("HOST").to_owned() +  endpoint)
         .json(&json)
         .headers(headers.clone())
         .send()
@@ -28,7 +27,7 @@ async fn post_request(client: &Client, json: &HashMap<&str, String>, headers: He
 }
 
 async fn get_request(client: &Client, headers: HeaderMap, endpoint: &str) -> Response {
-    client.get(HOST.to_owned() + endpoint)
+    client.get(read_env("HOST").to_owned() + endpoint)
         .headers(headers.clone())
         .send()
         .await.unwrap()
@@ -98,7 +97,7 @@ fn get_tracked_files(dir: &str) -> Vec<String> {
         .output().unwrap();
 
     if !output.status.success() {
-        eprintln!("Failed to get git files");
+        println!("Couldn't find any tracked files, make sure this folder is a git repo.");
         return vec![]
     }
 
@@ -110,7 +109,10 @@ fn get_tracked_files(dir: &str) -> Vec<String> {
     files
 }
 
-fn find_todo(file_path: &Path, regex: Regex) -> Vec<String> {
+fn find_todo(path: &str, file: &str, regex: Regex, repo_name: &str) -> Vec<String> {
+    let binding = path.to_owned() + "/" + file;
+    let file_path = Path::new(&binding);
+
     if file_path.display().to_string().ends_with(".png") {
         return vec![]
     }
@@ -118,15 +120,43 @@ fn find_todo(file_path: &Path, regex: Regex) -> Vec<String> {
     
     let contents = fs::read_to_string(file_path).unwrap();
 
-    for mat in regex.find_iter(&contents) {
-        let start = mat.start();
-        let line_number = contents[..start].lines().count();
-        let matched_text = mat.as_str().trim();
+    for caps in regex.captures_iter(&contents) {
+        if let Some(matched) = caps.get(1) { // Group 1 contains the captured TODO text
+            let start = matched.start();
+            let line_number = contents[..start].lines().count();
+            let matched_text = matched.as_str().trim();
 
-        todos.push(format!("[{}:{}]: {}", file_path.display(), line_number + 1, matched_text));
+            todos.push(format!(
+                "[{}:{}]: {}",
+                repo_name.to_owned() + "/" + file,
+                line_number + 1,
+                matched_text
+            ));
+        }
     }
 
     todos
+}
+
+fn make_todo_structure(data: Value, level: i32) {
+    let spacing = " ".repeat((level*4).try_into().unwrap());
+
+    println!("{}In {}:", spacing, data["name"].as_str().unwrap());
+
+    for todo in data["todos"].as_array().unwrap() {
+        let spacing = " ".repeat(((level+1)*4).try_into().unwrap());
+
+        print!("{}- [{}]: {} (ID: {})", spacing, if todo["completed"].as_bool().unwrap() { X } else { " " }, todo["content"], todo["id"])
+    }
+    println!("\n");
+
+    let array = data["children"].as_array().unwrap();
+
+    if !array.is_empty() {
+        for item in array {
+            make_todo_structure(item.clone(), level + 1)
+        }
+    }
 }
 
 #[tokio::main]  
@@ -184,6 +214,19 @@ async fn main() {
     
     
     match args[1].as_str() {
+        // "cd" => {
+        //     if args.len() < 3 {
+        //         println!("Please provide a path");
+        //         return
+        //     }
+
+        //     env::set_var("DIRECTORY", "");
+        //     let mut headers = HeaderMap::new();
+        //     headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+        //     let mut data = HashMap::new();
+        //     data.insert("cd", args[2].clone());
+        //     let refresh = post_request(&client, &data, headers, "/api/cd").await;
+        // }
         "todos" => {
             if args.len() < 3 {
                 println!("Missing argument after \"todos\".");
@@ -245,11 +288,14 @@ async fn main() {
                 }
                 // TODO: Fix wonky import code
                 "import" => {
-                    if args.len() < 6 {
-                        println!("Usage: todoterminal todos import <fs|git> <path|github url>");
+                    if args.len() < 5 {
+                        println!("Usage: todoterminal todos import <fs|git> <path|github url> [clone dest]");
                         return
                     }
                     let path = if args[3] == "git" {
+                        if args.get(5).is_none() {
+                            println!("Please provide a desination path to copy the repo too")
+                        }
                         let output = Command::new("git")
                             .arg("clone")
                             .arg(args[4].clone())
@@ -257,7 +303,7 @@ async fn main() {
                             .output().unwrap();
 
                         if !output.status.success() {
-                            eprintln!("Failed to clone git repo");
+                            eprintln!("Failed to clone git repo: {:?}", String::from_utf8_lossy(&output.stderr));
                             return
                         }
 
@@ -267,17 +313,33 @@ async fn main() {
                     } else {
                         ".".to_string()
                     };
+
                     let string_regex = get_input(&mut input, "(Optional) enter custom TODO matching regex:");
                     let regex = if !string_regex.is_empty() {
                         Regex::new(&string_regex).expect("Invalid regex")
                     } else {
-                        Regex::new(r"(?:\/\/ TODO:|# TODO:).*").expect("Invalid regex")
+                        Regex::new(r"(?:\/\/ TODO:|# TODO:)(.*)").expect("Invalid regex")
                     };
     
                     let mut success = true;
+                    let tracked_files = get_tracked_files(&path);
 
-                    for file in get_tracked_files(&path) {
-                        for todo in find_todo(Path::new(&(path.clone()+"/"+&file)), regex.clone()) {
+                    let output = Command::new("git")
+                        .arg("rev-parse")
+                        .arg("--show-toplevel")
+                        .output()
+                        .expect("Failed to execute git command");
+
+                    if !output.status.success() {
+                        eprintln!("Failed to retreive repo name: {:?}", String::from_utf8_lossy(&output.stderr));
+                        return
+                    }
+
+                    let repo_root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let repo_name = repo_root.split('/').last().unwrap_or_default();
+
+                    for file in &tracked_files {
+                        for todo in find_todo(&path, &file, regex.clone(), repo_name) {
                             let mut headers = HeaderMap::new();
                             headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
 
@@ -295,7 +357,7 @@ async fn main() {
                         }
                     }
 
-                    if success {
+                    if success && !tracked_files.is_empty() {
                         println!("Successfully imported all TODOs")
                     }
                 }
@@ -342,10 +404,15 @@ async fn main() {
                     let username = get_input(&mut input, "Please enter your desired username:");
                     println!("Your username is: {}", username);
 
-                    let email = get_input(&mut input, "Please enter your email address:");
-                    println!("Your email address is: {}", email);
+                    let email = get_input(&mut input, "NOTE: EMAILS ARE NOT USED AND CAN BE ANYTHING ASLONG AS IT FOLLOWS THE REGEX SINCE THIS A TEST ENVIRONMENT ;)\nPlease enter your email address:");
+                    let mail_match = Regex::new(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
+                    if mail_match.is_match(&email) {
+                        println!("Your email address is: {}", email);
+                    } else {
+                        println!("Error: mail is in incorrect format!")
+                    }
 
-                    let password = get_input(&mut input, "Please enter your password:");
+                    let password = get_input(&mut input, "NOTE: PASSWORDS ARE STORED IN PLAINTEXT SINCE THIS IS A TEST ENVIRONEMTN!!!\nPlease enter your password:");
                     println!("Your password is: {}", password);
 
                     let mut data = HashMap::new();
