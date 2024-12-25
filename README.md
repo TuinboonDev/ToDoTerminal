@@ -20,3 +20,11 @@ Encountering any issues? DM tuinboon on discord (or submit a PR!)
 `todoterminal todos list`<br>
 
 # Examples/ demos
+`Account Creation:`
+<img src="https://github.com/TuinboonDev/ToDoTerminal/blob/main/account.gif?raw=true">
+
+`Importing TODOs from git:`
+<img src="https://github.com/TuinboonDev/ToDoTerminal/blob/main/import.gif?raw=true">
+
+`Creating and updating TODOs:`
+<img src="https://github.com/TuinboonDev/ToDoTerminal/blob/main/todos.gif?raw=true">
