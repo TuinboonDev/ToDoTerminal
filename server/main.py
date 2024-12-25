@@ -6,6 +6,8 @@ import os
 import jwt
 import time
 
+# TODO: Write some library for parsing paths and make folders
+
 load_dotenv()
 app = Flask(__name__)
 
@@ -15,6 +17,7 @@ app = Flask(__name__)
 
 # TODO: fix file opening/ closing race conditions
 # TODO: use time instead of datetime for all expiry?
+# TODO: change endpoints with simple data to use dynamic urls /api/cd/<idk>
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 REFRESH_SECRET_KEY = os.getenv("REFRESH_KEY")
@@ -77,9 +80,7 @@ def create_user():
             return json.dumps({"error": "An account with this email already exists."}), 409
         if user["username"] == user_data["username"]:
             return json.dumps({"error": "This username is already taken."}), 409
-    
-    x = int(time.time())        
-    
+        
     # TODO: ig there could be duplicate IDs
     
     id = int(time.time())
@@ -90,13 +91,14 @@ def create_user():
     
     if not id in database:
         for user in cache:
-            if x >= user["expiry"]:
+            if id >= user["expiry"]:
                 cache.remove(user)
                 
-        user_data["expiry"] = x + 1800
+        user_data["expiry"] = id + 1800
         user_data["id"] = str(id)
         user_data["otp_key"] = otp_key
         user_data["purpose"] = "new_account"
+        user_data["cd"] = "/"
         cache.append(user_data)
         
         write_file("cache.json", cache)
@@ -138,7 +140,7 @@ def verify_account():
                         })
                         
                         if todos.get(id) == None:
-                            todos[id] = {"todos": []}
+                            todos[id] = {"count": 0, "todos": []}
                                 
                         write_file("todos.json", todos)
                         write_file("database.json", database)
@@ -233,9 +235,7 @@ def get_todos():
         
         todos_file = open("todos.json", "r")
         todos = json.load(todos_file)
-        
-        print(todos[user_id]["todos"])
-        
+                
         return todos[user_id]["todos"]
     
 @app.route("/api/todos/create", methods=["POST"])
@@ -330,6 +330,32 @@ def uncomplete_todo():
         write_file("todos.json", todos)
         
         return jsonify({"message": "Succesfully uncompleted todo"}), 200
+    
+# @app.route("/api/cd", methods=["GET", "POST"])
+# def cd():
+#     access_token = request.headers.get("Authorization")
+#     decoded = verify_token(access_token, SECRET_KEY)
+    
+#     if decoded == "expired":
+#         return jsonify({"error": "Access token expired"}), 401
+#     elif decoded == "invalid":
+#         return jsonify({"error": "Invalid token"}), 401
+#     else:
+#         user_id = decoded["user_id"]        
+#         database = read_file("database.json")
+        
+#         for user in database["users"]:
+#             if user["id"] == user_id:
+#                 if request.method == "GET":
+#                     return jsonify({"cd": user["cd"]}), 200
+                
+#                 elif request.method == "POST":
+#                     user["cd"] = json.loads(request.data)["cd"]
+#                     return jsonify({"message": "Success"}), 200    
+                    
+#         return jsonify({"error": "User not found"}), 404            
+
+# TODO: add breaks in loops if an item is found
 
 if __name__ == "__main__":
     app.run(debug=True)

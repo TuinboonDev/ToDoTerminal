@@ -1,1 +1,14 @@
-{"1734732139": {"count": 1, "todos": ["bruh"]}, "1734780165": {"count": 42, "data": {"name": "root", "children": [{"name": "folder1", "children": [], "todos": [{"id": 0, "content": "wow"}]}], "todos": [{"id": 1, "content": "nested stuff"}]}}}
+{
+    "1734732139": {
+        "count": 1,
+        "todos": [
+            "bruh"
+        ]
+    },
+    "1734988686": {
+        "count": 14,
+        "todos": [
+        
+        ]
+    }
+}
