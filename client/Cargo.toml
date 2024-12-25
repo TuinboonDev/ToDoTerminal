@@ -1,8 +1,8 @@
 [package]
 name = "todoterminal"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-license = "ALL RIGHTS RESERVED"
+license = "CC-BY-NC-SA-4.0"
 authors = ["Tuinboon <github@thijmens.nl>"]
 readme = "README.md"
 description = "A CLI tool for managing TODOs on a remote server"

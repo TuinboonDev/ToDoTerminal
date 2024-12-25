@@ -7,28 +7,27 @@ use std::io::{ Write, BufRead};
 use std::io;
 use std::env;
 use serde_json::Value;
-use dotenv::dotenv;
+use dotenv::from_filename;
 use reqwest::header::*;
 use reqwest::{ Response, Client };
 use base64::prelude::*;
 use chrono::Utc;
 use regex::Regex;
 
-const STORAGE_PATH: &str = "./.env";
 const CHECKMARK: &str = "V";
 const X: &str = "X";
 
 async fn post_request(client: &Client, json: &HashMap<&str, String>, headers: HeaderMap, endpoint: &str) -> Response {
     client.post(read_env("HOST").to_owned() +  endpoint)
         .json(&json)
-        .headers(headers.clone())
+        .headers(headers)
         .send()
         .await.unwrap()
 }
 
 async fn get_request(client: &Client, headers: HeaderMap, endpoint: &str) -> Response {
     client.get(read_env("HOST").to_owned() + endpoint)
-        .headers(headers.clone())
+        .headers(headers)
         .send()
         .await.unwrap()
 }
@@ -48,15 +47,30 @@ fn get_input(input: &mut String, question: &str) -> String {
 }
 
 fn write_env(key: &str, value: &str) {
-    let path = Path::new(STORAGE_PATH);
+    let env_path = if read_env("CREDS").is_empty() {
+        "./.env"
+    } else {
+        &read_env("CREDS")
+    };
+
+
+    let path = Path::new(env_path);
 
     let file = if !path.exists() {
-        File::create(&path)
-            .expect("Failed to create file")
+        File::options()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .expect("Failed to create and open file")
     } else {
-        File::open(&path)
+        File::options()
+            .read(true)
+            .write(true)
+            .open(path)
             .expect("Failed to open file")
     };
+    
     let reader = io::BufReader::new(file);
     
     let mut lines = Vec::new();
@@ -83,10 +97,11 @@ fn write_env(key: &str, value: &str) {
     for line in lines {
         writeln!(file, "{}", line).unwrap();
     }
+    from_filename(env_path).ok();
 }
 
 fn read_env(key: &str) -> String {
-    env::var(key).expect(&format!("{} env variable is unset.", key))
+    env::var(key).unwrap_or("".to_string())
 }
 
 fn get_tracked_files(dir: &str) -> Vec<String> {
@@ -118,7 +133,13 @@ fn find_todo(path: &str, file: &str, regex: Regex, repo_name: &str) -> Vec<Strin
     }
     let mut todos = Vec::new();
     
-    let contents = fs::read_to_string(file_path).unwrap();
+    let contents = fs::read_to_string(file_path);
+
+    if !contents.is_ok() {
+        return vec![]
+    }
+
+    let contents = contents.unwrap();
 
     for caps in regex.captures_iter(&contents) {
         if let Some(matched) = caps.get(1) { // Group 1 contains the captured TODO text
@@ -138,30 +159,35 @@ fn find_todo(path: &str, file: &str, regex: Regex, repo_name: &str) -> Vec<Strin
     todos
 }
 
-fn make_todo_structure(data: Value, level: i32) {
-    let spacing = " ".repeat((level*4).try_into().unwrap());
+// fn make_todo_structure(data: Value, level: i32) {
+//     let spacing = " ".repeat((level*4).try_into().unwrap());
 
-    println!("{}In {}:", spacing, data["name"].as_str().unwrap());
+//     println!("{}In {}:", spacing, data["name"].as_str().unwrap());
 
-    for todo in data["todos"].as_array().unwrap() {
-        let spacing = " ".repeat(((level+1)*4).try_into().unwrap());
+//     for todo in data["todos"].as_array().unwrap() {
+//         let spacing = " ".repeat(((level+1)*4).try_into().unwrap());
 
-        print!("{}- [{}]: {} (ID: {})", spacing, if todo["completed"].as_bool().unwrap() { X } else { " " }, todo["content"], todo["id"])
-    }
-    println!("\n");
+//         print!("{}- [{}]: {} (ID: {})", spacing, if todo["completed"].as_bool().unwrap() { X } else { " " }, todo["content"], todo["id"])
+//     }
+//     println!("\n");
 
-    let array = data["children"].as_array().unwrap();
+//     let array = data["children"].as_array().unwrap();
 
-    if !array.is_empty() {
-        for item in array {
-            make_todo_structure(item.clone(), level + 1)
-        }
-    }
-}
+//     if !array.is_empty() {
+//         for item in array {
+//             make_todo_structure(item.clone(), level + 1)
+//         }
+//     }
+// }
 
 #[tokio::main]  
 async fn main() {
-    dotenv().ok();
+    let env_path = if read_env("CREDS").is_empty() {
+        "./.env"
+    } else {
+        &read_env("CREDS")
+    };
+    from_filename(env_path).ok();
 
     let args: Vec<String> = env::args().collect();
 
@@ -171,7 +197,6 @@ async fn main() {
     }
 
     let client = reqwest::Client::new();
-
     let mut input = String::new();
 
     let access_token = read_env("ACCESS_TOKEN");
@@ -198,7 +223,15 @@ async fn main() {
 
     if refresh {
         let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, read_env("REFRESH_TOKEN").parse().unwrap());
+
+        let refresh_token = read_env("REFRESH_TOKEN");
+
+        if refresh_token.is_empty() {
+            eprintln!("No refresh token found, please login (except if you already are trying ;))");
+            return
+        }
+
+        headers.insert(AUTHORIZATION, refresh_token.parse().unwrap());
         let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
         let status = refresh.status();
         let json = get_request_json(refresh).await;
@@ -211,7 +244,18 @@ async fn main() {
             return
         }
     }
-    
+
+    let access_token = read_env("ACCESS_TOKEN");
+    let id = read_env("ID");
+    let url = read_env("HOST");
+
+    if id.is_empty() {
+        eprintln!("No ID found, please login (except if you already are trying ;))");
+        return
+    }
+    if url.is_empty() {
+        eprintln!("No server link found, please add one in the env file to get started!")
+    }
     
     match args[1].as_str() {
         // "cd" => {
@@ -241,7 +285,7 @@ async fn main() {
                     }
 
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let todos = get_request(&client, headers, "/api/todos/get").await;
                     let json_response = get_request_json(todos).await;
@@ -255,7 +299,7 @@ async fn main() {
                 }
                 "delete" => {
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let mut data = HashMap::new();
                     data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
@@ -271,7 +315,7 @@ async fn main() {
                 }
                 "create" => {
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let mut data = HashMap::new();
                     data.insert("content", args[3].clone());
@@ -341,7 +385,7 @@ async fn main() {
                     for file in &tracked_files {
                         for todo in find_todo(&path, &file, regex.clone(), repo_name) {
                             let mut headers = HeaderMap::new();
-                            headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                            headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                             let mut data = HashMap::new();
                             data.insert("content", todo);
@@ -363,7 +407,7 @@ async fn main() {
                 }
                 "complete" => {
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let mut data = HashMap::new();
                     data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
@@ -379,7 +423,7 @@ async fn main() {
                 }
                 "uncomplete" => {
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let mut data = HashMap::new();
                     data.insert("id", args.get(3).expect("Couldnt find argument").to_string());
@@ -404,7 +448,7 @@ async fn main() {
                     let username = get_input(&mut input, "Please enter your desired username:");
                     println!("Your username is: {}", username);
 
-                    let email = get_input(&mut input, "NOTE: EMAILS ARE NOT USED AND CAN BE ANYTHING ASLONG AS IT FOLLOWS THE REGEX SINCE THIS A TEST ENVIRONMENT ;)\nPlease enter your email address:");
+                    let email = get_input(&mut input, "NOTE: Emails are unimplemented\nPlease enter your email address:");
                     let mail_match = Regex::new(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
                     if mail_match.is_match(&email) {
                         println!("Your email address is: {}", email);
@@ -412,7 +456,7 @@ async fn main() {
                         println!("Error: mail is in incorrect format!")
                     }
 
-                    let password = get_input(&mut input, "NOTE: PASSWORDS ARE STORED IN PLAINTEXT SINCE THIS IS A TEST ENVIRONEMTN!!!\nPlease enter your password:");
+                    let password = get_input(&mut input, "Please enter your password:");
                     println!("Your password is: {}", password);
 
                     let mut data = HashMap::new();
@@ -432,7 +476,7 @@ async fn main() {
                 }
                 "logout" => {
                     let mut headers = HeaderMap::new();
-                    headers.insert(AUTHORIZATION, read_env("ACCESS_TOKEN").parse().unwrap());
+                    headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let logout = get_request(&client, headers, "/api/auth/logout").await;
 
@@ -500,7 +544,7 @@ async fn main() {
 
             let mut data = HashMap::new();
             
-            data.insert("id", read_env("ID"));
+            data.insert("id", id);
             data.insert("otp_code", otp_code);
             
             let verify_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/verify").await;

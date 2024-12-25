@@ -5,6 +5,7 @@ import pyotp
 import os
 import jwt
 import time
+import bcrypt
 
 # TODO: Write some library for parsing paths and make folders
 
@@ -94,10 +95,17 @@ def create_user():
             if id >= user["expiry"]:
                 cache.remove(user)
                 
+        password = user_data["password"].encode('utf-8')
+        salt = bcrypt.gensalt()
+        
+        hashed_password = bcrypt.hashpw(password, salt)
+                
         user_data["expiry"] = id + 1800
         user_data["id"] = str(id)
         user_data["otp_key"] = otp_key
         user_data["purpose"] = "new_account"
+        user_data["password"] = password
+        user_data["salt"] = salt
         user_data["cd"] = "/"
         cache.append(user_data)
         
@@ -135,6 +143,7 @@ def verify_account():
                             "password": cache_user["password"],
                             "email": cache_user["email"],
                             "otp_key": cache_user["otp_key"],
+                            "salt": cache_user["salt"],
                             "id": id,
                             "token_version": 0
                         })
@@ -168,7 +177,8 @@ def login():
     cache = read_file("cache.json")
         
     for user in database["users"]:
-        if user["email"] == user_data["email"] and user["password"] == user_data["password"] and user["username"] == user_data["username"]:
+        hashed_pw = bcrypt.hashpw(user_data["password"], user_data["salt"])
+        if user["email"] == user_data["email"] and user["password"] == hashed_pw and user["username"] == user_data["username"]:
             x = int(time.time())
 
             for user in cache:
