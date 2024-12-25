@@ -7,8 +7,8 @@ Its a CLI written in Rust connecting to an API written in Python. I went all out
 
 # Getting started
 Starting is as simple as a `cargo add todoterminal` and creating a .env file in any directory with one key `HOST="https://api.thijmens.nl` <a href="https://github.com/TuinboonDev/ToDoTerminal/blob/main/client/.env">as defined here</a>.<br>
-After having set up the env file you can optionally pass it to todoterminal, the default path it uses is ./.env ( in the same directory as the binary ).
-Passing the custom path can be done as follows, on windows: `set "CREDS=D:\mypath\.env" && todoterminal ...`, on linux: `CREDS="~/mypath/.env todoterminal ...`
+After having set up the env file you can optionally pass it to todoterminal, the default path it uses is ./.env ( in the same directory as the binary ).<br>
+Passing the custom path can be done as follows, on windows: `set "CREDS=D:\mypath\.env" && todoterminal ...`, on linux: `CREDS="~/mypath/.env todoterminal ...`.<br>
 After this you can use `todoterminal <command> [arguments]` a list of commands is down <a href="#commands">here</a>.<br><br>
 
 Encountering any issues? DM tuinboon on discord (or submit a PR!)
