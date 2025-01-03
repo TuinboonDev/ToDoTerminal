@@ -261,6 +261,15 @@ async fn main() {
             return
         }
     }
+    
+    // Some of these checks above and below are probably unneeded.
+    if args[2].to_string() == "create" && (!id.is_empty() || !access_token.is_empty() || !refresh_token.is_empty()) {
+        let another = get_input(&mut input, "You already have an account are you sure you want to create another one? (Y/n)");
+        if another.to_lowercase() == "n" {
+            println!("\nClosing!");
+            return
+        }
+    }
 
     let access_token = read_env("ACCESS_TOKEN");
     // We can assume the access token exists because it has just been written
@@ -454,9 +463,10 @@ async fn main() {
             match args[2].as_str() {
                 "login" => {
                     let username = get_input(&mut input, "Please enter your username:");
-                    println!("Your username is: {}", username);
+                    println!("Your username is: {}\n", username);
 
                     let email = get_input(&mut input, "Please enter your email address:");
+                    println!("Your email address is: {}\n", email);
                     // let mail_match = Regex::new(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
                     // if mail_match.is_match(&email) {
                     //     println!("Your email address is: {}", email);
@@ -465,7 +475,7 @@ async fn main() {
                     // }
 
                     let password = get_input(&mut input, "Please enter your password:");
-                    println!("Your password is: {}", password);
+                    println!("Your password is: {}\n", password);
 
                     let mut data = HashMap::new();
                     data.insert("username", username);
@@ -500,13 +510,13 @@ async fn main() {
                 }
                 "create" => {
                     let username = get_input(&mut input, "Please enter your desired username:");
-                    println!("Your username is: {}", username);
+                    println!("Your username is: {}\n", username);
 
                     let email = get_input(&mut input, "NOTE: Emails are unimplemented\nPlease enter your email address:");
-                    println!("Your email address is: {}", email);
+                    println!("Your email address is: {}\n", email);
 
                     let password = get_input(&mut input, "Please enter your password:");
-                    println!("Your password is: {}", password);
+                    println!("Your password is: {}\n", password);
 
                     let mut data = HashMap::new();
                     data.insert("username", username);
@@ -538,7 +548,7 @@ async fn main() {
                             write_env("REFRESH_TOKEN", json_response["refresh_token"].as_str().unwrap());
                             write_env("ACCESS_TOKEN", json_response["access_token"].as_str().unwrap());
 
-                            println!("good")
+                            println!("\n2FA successful")
                         }
                     } else {
                         eprintln!("Account was not created")
