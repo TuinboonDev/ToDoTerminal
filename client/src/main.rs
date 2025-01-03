@@ -445,16 +445,16 @@ async fn main() {
         "account" => {
             match args[2].as_str() {
                 "login" => {
-                    let username = get_input(&mut input, "Please enter your desired username:");
+                    let username = get_input(&mut input, "Please enter your username:");
                     println!("Your username is: {}", username);
 
-                    let email = get_input(&mut input, "NOTE: Emails are unimplemented\nPlease enter your email address:");
-                    let mail_match = Regex::new(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
-                    if mail_match.is_match(&email) {
-                        println!("Your email address is: {}", email);
-                    } else {
-                        println!("Error: mail is in incorrect format!")
-                    }
+                    let email = get_input(&mut input, "Please enter your email address:");
+                    // let mail_match = Regex::new(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").unwrap();
+                    // if mail_match.is_match(&email) {
+                    //     println!("Your email address is: {}", email);
+                    // } else {
+                    //     println!("Error: mail is in incorrect format!")
+                    // }
 
                     let password = get_input(&mut input, "Please enter your password:");
                     println!("Your password is: {}", password);
@@ -492,9 +492,9 @@ async fn main() {
                 }
                 "create" => {
                     let username = get_input(&mut input, "Please enter your desired username:");
-                    println!("Your desired username is: {}", username);
+                    println!("Your username is: {}", username);
 
-                    let email = get_input(&mut input, "Please enter your email address:");
+                    let email = get_input(&mut input, "NOTE: Emails are unimplemented\nPlease enter your email address:");
                     println!("Your email address is: {}", email);
 
                     let password = get_input(&mut input, "Please enter your password:");
