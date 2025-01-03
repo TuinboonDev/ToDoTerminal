@@ -70,7 +70,7 @@ fn write_env(key: &str, value: &str) {
             .open(path)
             .expect("Failed to open file")
     };
-    
+
     let reader = io::BufReader::new(file);
     
     let mut lines = Vec::new();
@@ -221,15 +221,32 @@ async fn main() {
         refresh = true;
     }
 
-    if refresh {
-        let mut headers = HeaderMap::new();
+    let refresh_token = read_env("REFRESH_TOKEN");
+    let id = read_env("ID");
+    let url = read_env("HOST");
 
-        let refresh_token = read_env("REFRESH_TOKEN");
-
-        if refresh_token.is_empty() {
-            eprintln!("No refresh token found, please login (except if you already are trying ;))");
+    if refresh_token.is_empty() {
+        if args[1].to_string() != "2fa" && args[1].to_string() != "login" && args[2].to_string() != "create" {
+            println!("{}", args[2].to_string());
+            eprintln!("No refresh token found, please login.");
             return
         }
+        refresh = false;
+    }
+    if id.is_empty() {
+        if args[1].to_string() != "2fa" && args[1].to_string() != "login" && args[2].to_string() != "create" {
+            eprintln!("No ID found, please login.");
+            return
+        }
+    }
+    if url.is_empty() {
+        eprintln!("No server link found, please add one in the env file to get started!");
+        return
+    }
+
+
+    if refresh {
+        let mut headers = HeaderMap::new();
 
         headers.insert(AUTHORIZATION, refresh_token.parse().unwrap());
         let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
@@ -246,16 +263,7 @@ async fn main() {
     }
 
     let access_token = read_env("ACCESS_TOKEN");
-    let id = read_env("ID");
-    let url = read_env("HOST");
-
-    if id.is_empty() {
-        eprintln!("No ID found, please login (except if you already are trying ;))");
-        return
-    }
-    if url.is_empty() {
-        eprintln!("No server link found, please add one in the env file to get started!")
-    }
+    // We can assume the access token exists because it has just been written
     
     match args[1].as_str() {
         // "cd" => {
