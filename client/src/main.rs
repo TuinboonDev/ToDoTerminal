@@ -306,11 +306,11 @@ async fn main() {
 
                     let todos = get_request(&client, headers, "/api/todos/get").await;
                     let status = todos.status();
-                    let json_response = get_request_json(todos).await;
-                    
+                    let json = get_request_json(todos).await;
+
                     if status == 200 {
                         println!("Your TODOs:");
-                        if let Some(items) = json_response.as_array() {
+                        if let Some(items) = json.as_array() {
                             for item in items {
                                 println!("[{}:{}]: {}", if item["completed"].as_bool().unwrap() { CHECKMARK } else { X }, item["id"], item["content"]);
                             }
