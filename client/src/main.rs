@@ -263,7 +263,7 @@ async fn main() {
     }
     
     // Some of these checks above and below are probably unneeded.
-    if args[2].to_string() == "create" && (!id.is_empty() || !access_token.is_empty() || !refresh_token.is_empty()) {
+    if args.get(2).is_some().to_string() == "create" && (!id.is_empty() || !access_token.is_empty() || !refresh_token.is_empty()) {
         let another = get_input(&mut input, "You already have an account are you sure you want to create another one? (Y/n)");
         if another.to_lowercase() == "n" {
             println!("\nClosing!");
@@ -305,14 +305,20 @@ async fn main() {
                     headers.insert(AUTHORIZATION, access_token.parse().unwrap());
 
                     let todos = get_request(&client, headers, "/api/todos/get").await;
+                    let status = todos.status();
                     let json_response = get_request_json(todos).await;
-
-                    println!("Your TODOs:");
-                    if let Some(items) = json_response.as_array() {
-                        for item in items {
-                            println!("[{}:{}]: {}", if item["completed"].as_bool().unwrap() { CHECKMARK } else { X }, item["id"], item["content"]);
+                    
+                    if status == 200 {
+                        println!("Your TODOs:");
+                        if let Some(items) = json_response.as_array() {
+                            for item in items {
+                                println!("[{}:{}]: {}", if item["completed"].as_bool().unwrap() { CHECKMARK } else { X }, item["id"], item["content"]);
+                            }
                         }
+                    } else if status == 401 {
+                        println!("{}", json["error"].as_str().unwrap())
                     }
+                    
                 }
                 "delete" => {
                     let mut headers = HeaderMap::new();
@@ -554,7 +560,9 @@ async fn main() {
                         eprintln!("Account was not created")
                     }
                 },
-                _ => {}
+                e => {
+                    println!("Error recognizing subcommand \"{}\"", e)
+                }
             }
         }
         "2fa" => {
@@ -581,8 +589,8 @@ async fn main() {
                 eprintln!("Unrecognized HTTP response code!")
             }
         }
-        _ => {
-            println!("Error recognizing command")
+        e => {
+            println!("Error recognizing subcommand \"{}\"", e)
         }
     }
 }
