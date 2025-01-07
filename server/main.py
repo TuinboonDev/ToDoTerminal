@@ -128,7 +128,7 @@ def verify_account():
     todos = read_file("todos.json")
         
     for cache_user in cache:
-        if cache_user["id"] == user_data["id"]:
+        if cache_user["username"] == user_data["identification"]:
             totp = pyotp.TOTP(cache_user["otp_key"])
             if totp.verify(user_data["otp_code"]):
                 cache.remove(cache_user)
@@ -182,9 +182,9 @@ def login():
         if user["email"] == user_data["email"] and base64.b64decode(user["password"]) == hashed_pw and user["username"] == user_data["username"]:
             x = int(time.time())
 
-            for user in cache:
-                if x >= user["expiry"]:
-                    cache.remove(user)
+            for expired_user in cache:
+                if x >= expired_user["expiry"]:
+                    cache.remove(expired_user)
 
             user["purpose"] = "2fa"
             user["expiry"] = x + 1800

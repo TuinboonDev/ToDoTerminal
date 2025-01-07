@@ -1,6 +1,6 @@
 [package]
 name = "todoterminal"
-version = "0.1.3"
+version = "0.1.5"
 edition = "2021"
 license = "CC-BY-NC-SA-4.0"
 authors = ["Tuinboon <github@thijmens.nl>"]
@@ -12,7 +12,7 @@ repository = "https://github.com/TuinboonDev/ToDoTerminal/"
 [dependencies]
 base64 = "0.22.1"
 chrono = "0.4.39"
-dotenv = "0.15.0"
+dotenvy = "0.15.7"
 qr2term = "0.3.3"
 regex = "1.11.1"
 reqwest = { version = "0.12.9", features = ["json"] }

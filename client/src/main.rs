@@ -7,7 +7,7 @@ use std::io::{ Write, BufRead};
 use std::io;
 use std::env;
 use serde_json::Value;
-use dotenv::from_filename;
+use dotenvy::from_path_override;
 use reqwest::header::*;
 use reqwest::{ Response, Client };
 use base64::prelude::*;
@@ -53,7 +53,6 @@ fn write_env(key: &str, value: &str) {
         &read_env("CREDS")
     };
 
-
     let path = Path::new(env_path);
 
     let file = if !path.exists() {
@@ -97,7 +96,7 @@ fn write_env(key: &str, value: &str) {
     for line in lines {
         writeln!(file, "{}", line).unwrap();
     }
-    from_filename(env_path).ok();
+    from_path_override(env_path).ok();
 }
 
 fn read_env(key: &str) -> String {
@@ -187,7 +186,7 @@ async fn main() {
     } else {
         &read_env("CREDS")
     };
-    from_filename(env_path).ok();
+    from_path_override(env_path).ok();
 
     let args: Vec<String> = env::args().collect();
 
@@ -222,40 +221,45 @@ async fn main() {
     }
 
     let refresh_token = read_env("REFRESH_TOKEN");
-    let id = read_env("ID");
+    //let id = read_env("ID");
     let url = read_env("HOST");
 
     if refresh_token.is_empty() {
-        if args[1].to_string() != "2fa" && args[1].to_string() != "login" && args[2].to_string() != "create" {
-            println!("{}", args[2].to_string());
+        if args.get(1) != Some(&"2fa".to_string()) && args.get(2) != Some(&"login".to_string()) && args.get(2) != Some(&"create".to_string()) {
             eprintln!("No refresh token found, please login.");
             return
         }
         refresh = false;
     }
-    if id.is_empty() {
-        if args[1].to_string() != "2fa" && args[1].to_string() != "login" && args[2].to_string() != "create" {
-            eprintln!("No ID found, please login.");
-            return
-        }
-    }
+    // if id.is_empty() {
+    //     if args.get(1) != Some(&"2fa".to_string()) && args.get(2) != Some(&"login".to_string()) && args.get(2) != Some(&"create".to_string()) {
+    //         eprintln!("No ID found, please login.");
+    //         return
+    //     }
+    // }
     if url.is_empty() {
         eprintln!("No server link found, please add one in the env file to get started!");
         return
     }
 
-
     if refresh {
         let mut headers = HeaderMap::new();
-
         headers.insert(AUTHORIZATION, refresh_token.parse().unwrap());
+        
         let refresh = post_request(&client, &HashMap::new(), headers, "/api/auth/refresh").await;
         let status = refresh.status();
         let json = get_request_json(refresh).await;
     
         if status == 200 {
             write_env("ACCESS_TOKEN", json["access_token"].as_str().unwrap());
-            println!("Succesfully refreshed access token.")
+            println!("Succesfully refreshed access token.");
+
+            let env_path = if read_env("CREDS").is_empty() {
+                "./.env"
+            } else {
+                &read_env("CREDS")
+            };
+            from_path_override(env_path).ok();
         } else if status == 400 {
             eprintln!("Error while refreshing access_token: {}\nPlease try to log in again", json["error"]);
             return
@@ -263,7 +267,7 @@ async fn main() {
     }
     
     // Some of these checks above and below are probably unneeded.
-    if args.get(2).is_some().to_string() == "create" && (!id.is_empty() || !access_token.is_empty() || !refresh_token.is_empty()) {
+    if args.get(2) == Some(&"create".to_string()) && (!access_token.is_empty() || !refresh_token.is_empty()) {
         let another = get_input(&mut input, "You already have an account are you sure you want to create another one? (Y/n)");
         if another.to_lowercase() == "n" {
             println!("\nClosing!");
@@ -567,10 +571,11 @@ async fn main() {
         }
         "2fa" => {
             let otp_code = get_input(&mut input, "Please enter your 2fa code:");
+            let identification = get_input(&mut input, "\nPlease enter your username:");
 
             let mut data = HashMap::new();
             
-            data.insert("id", id);
+            data.insert("identification", identification);
             data.insert("otp_code", otp_code);
             
             let verify_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/verify").await;
@@ -581,8 +586,6 @@ async fn main() {
             if status == 200 {
                 write_env("REFRESH_TOKEN", json_response["refresh_token"].as_str().unwrap());
                 write_env("ACCESS_TOKEN", json_response["access_token"].as_str().unwrap());
-
-                println!("{}", json_response)
             } else if status == 401 || status == 404 {
                 eprintln!("Error: {}", json_response["error"].as_str().unwrap().to_string())
             } else {
