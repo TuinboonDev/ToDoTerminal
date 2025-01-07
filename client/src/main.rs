@@ -253,13 +253,6 @@ async fn main() {
         if status == 200 {
             write_env("ACCESS_TOKEN", json["access_token"].as_str().unwrap());
             println!("Succesfully refreshed access token.");
-
-            let env_path = if read_env("CREDS").is_empty() {
-                "./.env"
-            } else {
-                &read_env("CREDS")
-            };
-            from_path_override(env_path).ok();
         } else if status == 400 {
             eprintln!("Error while refreshing access_token: {}\nPlease try to log in again", json["error"]);
             return
