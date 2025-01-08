@@ -522,7 +522,7 @@ async fn main() {
                     println!("Your password is: {}\n", password);
 
                     let mut data = HashMap::new();
-                    data.insert("username", username);
+                    data.insert("username", username.clone());
                     data.insert("password", password);
                     data.insert("email", email);
 
@@ -539,7 +539,7 @@ async fn main() {
 
                         let id = json_response["id"].as_str().unwrap().to_string();
                         data.clear();
-                        data.insert("id", id.clone());
+                        data.insert("identification", username.clone());
                         data.insert("otp_code", otp_code);
 
                         let verify_account = post_request(&client, &data, HeaderMap::new(), "/api/auth/verify").await;
